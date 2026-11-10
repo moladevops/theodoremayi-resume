@@ -28,7 +28,7 @@ variable "distribution_id" {
 variable "github_repository" {
   description = "Repository allowed to deploy, as owner/name"
   type        = string
-  default     = "moladevops/theodoremayi-site"
+  default     = "moladevops/theodoremayi-resume"
 }
 
 variable "create_github_oidc_provider" {
