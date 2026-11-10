@@ -31,6 +31,14 @@ variable "github_repository" {
   default     = "moladevops/theodoremayi-resume"
 }
 
+# GitHub's OIDC subject includes the immutable owner and repository IDs:
+# repo:<owner>@<owner_id>/<repo>@<repo_id>:environment:<environment>
+variable "github_oidc_subject" {
+  description = "Exact sub claim of the deploy job's OIDC token (shown by the workflow's debug step)"
+  type        = string
+  default     = "repo:moladevops@224841099/theodoremayi-resume@1453049398:environment:production"
+}
+
 variable "create_github_oidc_provider" {
   description = "Create the GitHub Actions OIDC provider. Set to false if the AWS account already has one."
   type        = bool
@@ -79,7 +87,7 @@ data "aws_iam_policy_document" "trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:environment:production"]
+      values   = [var.github_oidc_subject]
     }
   }
 }
