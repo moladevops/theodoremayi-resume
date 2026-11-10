@@ -1,0 +1,79 @@
+name: Deploy site
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+# One deployment at a time; a newer push cancels an older one still running.
+concurrency:
+  group: deploy-site
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: ${{ vars.S3_BUCKET || 's3schoolstatic' }}
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID || 'E1G4CZAO00R8D6' }}
+  SITE_URL: https://www.theodoremayi.com
+
+jobs:
+  check:
+    name: Check site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check files, links and privacy
+        run: python3 scripts/check_site.py site
+
+  deploy:
+    name: Deploy to S3 + CloudFront
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write   # OIDC: GitHub proves its identity to AWS, no stored AWS keys
+
+    environment:
+      name: production
+      url: ${{ env.SITE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload to S3
+        run: |
+          # Pages: always revalidated, so updates show up right away
+          aws s3 sync site "s3://$S3_BUCKET" --delete \
+            --exclude "*" --include "*.html" --include "*.xml" --include "*.txt" \
+            --cache-control "public, max-age=0, must-revalidate"
+          # Assets and PDFs: cached for one day
+          aws s3 sync site "s3://$S3_BUCKET" --delete \
+            --exclude "*.html" --exclude "*.xml" --exclude "*.txt" \
+            --cache-control "public, max-age=86400"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*" \
+            --query 'Invalidation.Id' --output text
+
+      - name: Smoke test
+        run: |
+          for path in / /en.html /assets/style.css /cv/Theodore-MAYI-MOLA-Cloud-Engineer-FR.pdf; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE_URL$path")
+            echo "$path -> $code"
+            [ "$code" = "200" ] || exit 1
+          done
